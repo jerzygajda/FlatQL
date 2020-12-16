@@ -9,7 +9,7 @@ python version >= 3.0
 ### Installing
 
 ```python
-pip install flatql
+pip3 install git+https://github.com/jerzygajda/FlatQL.git
 ```
 
 ## Quick usage
