@@ -79,8 +79,13 @@ def find(input_data, path, current_path=None):
     """
     fields_found = []
     if isinstance(input_data, dict) and path:
-        new_path = f'{current_path}.{path[0]}' if current_path else path[0]
-        fields_found.extend(find(input_data.get(path[0]), path[1:], new_path))
+        if path[0] == '*':
+            for key, value in input_data.items():
+                new_path = f'{current_path}.{key}' if current_path else key
+                fields_found.extend(find(value, path[1:], new_path))
+        else:
+            new_path = f'{current_path}.{path[0]}' if current_path else path[0]
+            fields_found.extend(find(input_data.get(path[0]), path[1:], new_path))
     elif isinstance(input_data, list) and path:
         if path[0] == '*':
             for idx, item in enumerate(input_data):
@@ -102,9 +107,15 @@ def rewrite_path(path, template):
     :param template: template string, example: b.*.name
     :return: string, example: b.#0.name
     """
-    for p in path.split('.'):
-        if p.startswith('#'):
-            template = template.replace('*', p, 1)
+    path_parts = path.split('.')
+    template_parts = template.split('.')
+
+    for t in template_parts:
+        if t.startswith('{') and t.endswith('}'):
+            key_idx = int(t[1:-1])
+            if key_idx < len(path_parts):
+                key_name = path_parts[key_idx]
+                template = template.replace(t, key_name, 1)
     return template
 
 def transform(input_data, transform_config):
@@ -119,14 +130,15 @@ def transform(input_data, transform_config):
     for src, dst in transform_config.items():
         fields_found = find(input_data, src.split('.'), None)
         for field in fields_found:
-            if isinstance(dst, str):
+            if dst is None:
+                flat_data.append((field[0], field[1]))
+            elif isinstance(dst, str):
                 target_path = rewrite_path(field[0], dst)
                 result = simple_rewrite(field[0], target_path, field[1])
                 flat_data.append(result)
             else:
                 func = dst[0]
                 args = dst[1:]
-                target_path = rewrite_path(field[0], args[0])
                 result = func(field[1], field[0], *args)
                 flat_data.append(result)
     result = {}
@@ -141,3 +153,12 @@ def transform(input_data, transform_config):
                 current_level.setdefault(p, {})
                 current_level = current_level[p]
     return convert_pseudo_list(result)
+
+def extract(input_data, paths):
+    """Extracts only particular paths from input data
+
+    :param input_data: dict or list
+    :param paths: list with paths
+    :return: dict or list
+    """
+    return transform(input_data, {path: None for path in paths})

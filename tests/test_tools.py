@@ -1,5 +1,5 @@
 import unittest
-from flatql import get_in, set_in, find_in_path, find_in_paths, transform, rewrite_path
+from flatql import get_in, set_in, find_in_path, find_in_paths, transform, rewrite_path, extract
 
 
 class TestDocument(unittest.TestCase):
@@ -81,7 +81,7 @@ class TestDocument(unittest.TestCase):
                     'test': {'id': '00000000-0000-0000-0000-000000000002'},
                     'list': [{'id': '00000000-0000-0000-0000-000000000003'},
                              {'id': '00000000-0000-0000-0000-000000000004'}]}
-        config = {'res_uuid': 'id', 'list.*.id': 'list.*', 'res_name': 'name'}
+        config = {'res_uuid': 'id', 'list.*.id': 'list.{1}', 'res_name': 'name'}
         result = transform(resource, config)
         expected = {'id': '00000000-0000-0000-0000-000000000001',
                     'name': 'Test resource',
@@ -108,7 +108,7 @@ class TestDocument(unittest.TestCase):
                     '00000000-0000-0000-0000-000000000004':
                         {'res_name': 'test 2', 'res_uuid': '00000000-0000-0000-0000-000000000004'}}
         config = {'res_uuid': 'id',
-                  'list.*': (transform_item, 'list.*', manifest)}
+                  'list.*': (transform_item, 'list.{1}', manifest)}
         result = transform(resource, config)
         expected = {'id': '00000000-0000-0000-0000-000000000001',
                     'list': [
@@ -132,7 +132,7 @@ class TestDocument(unittest.TestCase):
 
     def test_simple_transform_list(self):
         resource = {'a': {'aa': [{'item': 1}, {'item': 2}]}}
-        config = {'a.aa.*.item': 'b.bb.*.element'}
+        config = {'a.aa.*.item': 'b.bb.{2}.element'}
         result = transform(resource, config)
         expected = {'b': {'bb': [{'element': 1}, {'element': 2}]}}
         self.assertEqual(result, expected)
@@ -151,6 +151,21 @@ class TestDocument(unittest.TestCase):
         expected = {'x': {'a': 'aa', 'b': 'bb'}}
         self.assertEqual(result, expected)
 
+    def test_transform_with_path_parts_reorder(self):
+        resource = {
+            'a': {'aa': 'aaa'},
+            'b': {'bb': 'bbb'},
+            'c': {'cc': 'ccc'}
+        }
+        config = {'*.*': '{1}.{0}'}
+        result = transform(resource, config)
+        expected = {
+            'aa': {'a': 'aaa'},
+            'bb': {'b': 'bbb'},
+            'cc': {'c': 'ccc'}
+        }
+        self.assertEqual(result, expected)
+
     def test_complex_transform(self):
         resource = {'count': 2, 'entries': [
             {'res_name': 'A', 'authors': [{'id': 1, 'res_name': 'Author 1'},
@@ -158,12 +173,26 @@ class TestDocument(unittest.TestCase):
             {'res_name': 'B', 'authors': [{'id': 4, 'res_name': 'Author 4'},
                                           {'id': 1, 'res_name': 'Author 1'}]}]}
         config = {'count': 'elements',
-                  'entries.*.res_name': 'items.*.name',
-                  'entries.*.authors.*.id': 'items.*.authors.*.ref'}
+                  'entries.*.res_name': 'items.{1}.name',
+                  'entries.*.authors.*.id': 'items.{1}.authors.{3}.ref'}
         result = transform(resource, config)
         expected = {'elements': 2, 'items': [
             {'name': 'A', 'authors': [{'ref': 1}, {'ref': 2}]},
             {'name': 'B', 'authors': [{'ref': 4}, {'ref': 1}]}]}
+        self.assertEqual(result, expected)
+    
+    def test_transform_lists_with_index(self):
+        resource = {'count': 2, 'entries': [
+            {'res_name': 'A', 'authors': [{'id': 1, 'res_name': 'Author 1'},
+                                          {'id': 2, 'res_name': 'Author 2'}]},
+            {'res_name': 'B', 'authors': [{'id': 4, 'res_name': 'Author 4'},
+                                          {'id': 1, 'res_name': 'Author 1'}]}]}
+        config = {
+            'entries.#0.authors.#0.res_name': 'name',
+            'entries.#0.authors.#0.id': 'id'
+            }
+        result = transform(resource, config)
+        expected = {'name': 'Author 1', 'id': 1}
         self.assertEqual(result, expected)
 
     def test_transform_with_function(self):
@@ -174,7 +203,7 @@ class TestDocument(unittest.TestCase):
         resource = {'authors': [{'id': 1, 'res_name': 'Author 1'},
                                 {'id': 2, 'res_name': 'Author 2'}]}
 
-        config = {'authors.*': (transform_item, 'creator.*')}
+        config = {'authors.*': (transform_item, 'creator.{1}')}
 
         result = transform(resource, config)
         expected = {'creator': [{'test': 1}, {'test': 1}]}
@@ -186,9 +215,9 @@ class TestDocument(unittest.TestCase):
                                    'authors': [{'name': 'Author 1'}, {'name': 'Author 2'}]},
                                   {'name': 'Item 2',
                                    'authors': [{'name': 'Author 3'}, {'name': 'Author 4'}]}]}
-        config = {'list.*.id': 'list.*.uuid',
-                  'deep_list.*.name': 'deep_list.*.display_name',
-                  'deep_list.*.authors.*.name': 'deep_list.*.authors.*.n'}
+        config = {'list.*.id': 'list.{1}.uuid',
+                  'deep_list.*.name': 'deep_list.{1}.display_name',
+                  'deep_list.*.authors.*.name': 'deep_list.{1}.authors.{3}.n'}
         result = transform(resource, config)
         expected = {'deep_list':
                         [{'authors': [{'n': 'Author 1'}, {'n': 'Author 2'}],
@@ -200,16 +229,19 @@ class TestDocument(unittest.TestCase):
 
     def test_transform_dict_with_list_to_list(self):
         resource = {'list': [{'id': 1, 'name': 'Item 1'}, {'id': 2, 'name': 'Item 2'}]}
-        config = {'list.*.id': '*.id',
-                  'list.*.name': '*.title'}
+        config = {'list.*.id': '{1}.id',
+                  'list.*.name': '{1}.title'}
         result = transform(resource, config)
         expected = [{'id': 1, 'title': 'Item 1'}, {'id': 2, 'title': 'Item 2'}]
         self.assertEqual(result, expected)
 
     def test_rewrite_path(self):
-        self.assertEqual('item.#0.id', rewrite_path('list.#0.id', 'item.*.id'))
-        self.assertEqual('item.#0.#1.id', rewrite_path('list.#0.#1.id', 'item.*.*.id'))
-        self.assertEqual('#0.id', rewrite_path('list.#0.id', '*.id'))
+        self.assertEqual('item.#0.id', rewrite_path('list.#0.id', 'item.{1}.id'))
+        self.assertEqual('item.#0.#1.id', rewrite_path('list.#0.#1.id', 'item.{1}.{2}.id'))
+        self.assertEqual('#0.id', rewrite_path('list.#0.id', '{1}.id'))
+        self.assertEqual('#100.id', rewrite_path('list.#100.id', '{1}.id'))
+        self.assertEqual('items.item_1.uuid', rewrite_path('items.item_1.id', 'items.{1}.uuid'))
+        self.assertEqual('d.c.b.a', rewrite_path('a.b.c.d', '{3}.{2}.{1}.{0}'))
 
     def test_transform_list_first_and_last_element(self):
         resource = [{'id': 1, 'name': 'First'},
@@ -221,4 +253,61 @@ class TestDocument(unittest.TestCase):
                   '#-1.name': 'last.title'}
         result = transform(resource, config)
         expected = {'first': {'id': 1, 'title': 'First'}, 'last': {'id': 3, 'title': 'Last'}}
+        self.assertEqual(result, expected)
+
+    def test_transform_with_dict_keys_wildcard(self):
+        resource = {
+            'items': {
+                'item_1': {'id': 1, 'name': 'Item 1'},
+                'item_2': {'id': 2, 'name': 'Item 2'},
+                'item_3': {'id': 3, 'name': 'Item 3'}
+            }
+        }
+        config = {'items.*.name': 'elements.{1}.title'}
+        result = transform(resource, config)
+        expected = {
+            'elements': {
+                'item_1': {'title': 'Item 1'},
+                'item_2': {'title': 'Item 2'},
+                'item_3': {'title': 'Item 3'}
+            }
+        }
+        self.assertEqual(result, expected)
+
+    def test_extract(self):
+        resource = {
+            'items': [
+                {'id': 1, 'name': 'Item 1', 'description': 'Item 1 description'},
+                {'id': 2, 'name': 'Item 2', 'description': 'Item 2 description'},
+                {'id': 3, 'name': 'Item 3', 'description': 'Item 3 description'}
+            ]
+        }
+        paths = ['items.*.name', 'items.*.id']
+        result = extract(resource, paths)
+        expected = {
+            'items': [
+                {'id': 1, 'name': 'Item 1'},
+                {'id': 2, 'name': 'Item 2'},
+                {'id': 3, 'name': 'Item 3'}
+            ]
+        }
+        self.assertEqual(result, expected)
+
+    def test_extract_with_dict_keys_wildcard(self):
+        resource = {
+            'items': {
+                'item_1': {'id': 1, 'name': 'Item 1'},
+                'item_2': {'id': 2, 'name': 'Item 2'},
+                'item_3': {'id': 3, 'name': 'Item 3'}
+            }
+        }
+        paths = ['items.*.name']
+        result = extract(resource, paths)
+        expected = {
+            'items': {
+                'item_1': {'name': 'Item 1'},
+                'item_2': {'name': 'Item 2'},
+                'item_3': {'name': 'Item 3'}
+            }
+        }
         self.assertEqual(result, expected)

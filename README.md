@@ -20,7 +20,7 @@ Sometimes you need to find all values on a particular path.
 In this case, we have config `items.*.name` in human language means: go to `items` key and for every item get the value of `name` key.
 
 ```python
-from dmtools import find_in_path 
+from flatql import find_in_path 
 data = {'items': [{'name': 'Item 1'},
                   {'name': 'Item 2'}]}
 result = find_in_path(data, 'items.*.name'])
@@ -36,7 +36,7 @@ In this example, we have `resource` it's our input data, and `config` its mappin
 Config is a simple dictionary where keys were paths to find in input data and values is a destination path.
 
 ```python
-from dmtools import transform
+from flatql import transform
 
 resource = {'res_uuid': '00000000-0000-0000-0000-000000000001',
             'res_name': 'Test resource',
@@ -44,10 +44,10 @@ resource = {'res_uuid': '00000000-0000-0000-0000-000000000001',
             'list': [{'id': '00000000-0000-0000-0000-000000000003'},
                      {'id': '00000000-0000-0000-0000-000000000004'}]}
 
-config = {'res_uuid': 'id',
-          'list.*.id': 'items.*', # '*' in path means every list item
+config = {'res_uuid': 'id', # map res_uuid to id
+          'list.*.id': 'items.{1}', # '*' in path means every list item, {1} in target is index of key from path parts
           'res_name': 'name'}
-result = transform(input_data, transform_config)
+result = transform(resource, config)
 #{'id': '00000000-0000-0000-0000-000000000001',
 # 'name': 'Test resource',
 # 'items': ['00000000-0000-0000-0000-000000000003',
@@ -60,7 +60,7 @@ This example is very similar to the previous one. One difference is in the confi
 In this case we attach transform function `transform_item(item, path, template)` to configuration.
 
 ```python
-from dmtools import transform, rewrite_path
+from flatql import transform, rewrite_path
 
 def transform_item(item, path, template):
     target_path = rewrite_path(path, template)
@@ -70,10 +70,27 @@ resource = {'authors': [{'id': 1, 'res_name': 'Author 1'},
                         {'id': 2, 'res_name': 'Author 2'}]}
 
 # for every item in authors call transform_item and save the result in creator
-config = {'authors.*': (transform_item, 'creator.*')}
+config = {'authors.*': (transform_item, 'creator.{1}')}
 
 result = transform(resource, config)
 #{'creator': [{'test': 1}, {'test': 1}]}
+```
+
+### Extract some data from dictionary/list
+
+To extract only specified data you can use extract function
+
+```python
+from flatql import extract
+
+resource = {'authors': [{'id': 1, 'res_name': 'Author 1'},
+                        {'id': 2, 'res_name': 'Author 2'}]}
+
+# for every item in authors get id field
+paths = ['authors.*.id']
+
+result = extract(resource, paths)
+#{'authors': [{'id': 1}, {'id': 2}]}
 ```
 
 ### Get and Set values
@@ -81,7 +98,7 @@ result = transform(resource, config)
 You can also get or set values based on the path.
 
 ```python
-from dmtools import get_in, set_in
+from flatql import get_in, set_in
 
 data = {}
 data = set_in(data, 'items.#0.name', 'Test 1')
